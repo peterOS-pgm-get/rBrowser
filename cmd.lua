@@ -1,3 +1,5 @@
+net.setup()
+
 if not _G.pgm.rBrowser then
     _G.pgm.rBrowser = {
         api = dofile('api.lua')

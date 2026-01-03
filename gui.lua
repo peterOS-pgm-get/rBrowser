@@ -27,6 +27,8 @@ local homeButton = pos.gui.Button(window.w - 2, 1, 1, 1, colors.gray, colors.lig
     api.goHome()
 end)
 window:addElement(homeButton)
+local btnSep = pos.gui.TextBox(window.w - 1, 1, colors.gray, colors.lightGray, ' ')
+window:addElement(btnSep)
 
 local page = pos.gui.ScrollField(1, 2, window.w, window.h - 1)
 window:addElement(page)

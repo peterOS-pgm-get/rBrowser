@@ -15,6 +15,8 @@ local api = {
     bookmarkWindowInput = nil, ---@type TextInput
     refreshButton = nil, ---@type Button
     _cookies = {}, ---@type { [string]: string }
+    _refreshTimer = nil, ---@type number?
+    _waitingMsgId = -1, ---@type number
 }
 
 function api.addToHistory()
@@ -116,13 +118,16 @@ end
 local pageElements = {} ---@type UiElement[]
 local formElements = {} ---@type TextInput[]
 
+local refreshTimer = nil
 function api.refresh()
+    api.log:info("Loading page %s://%s%s", api.url.proto or 'rttp', api.url.domain, api.url.path or '/')
+
     local dest = api.url.domain ---@type string|number
     local dIp = net.ipToNumber(dest)
     if dIp > 0 then
         dest = dIp
     end
-    
+
     if api.urlBarElement then
         api.urlBarElement:setText(api.getUrl(true))
         api.setSecure(false)
@@ -132,8 +137,39 @@ function api.refresh()
     end
     pos.gui.redrawWindows()
 
-    local rt = rttp.getSync(dest, api.url.path, api._cookies[dest])
-    
+    local rt = rttp.get(dest, api.url.path, api._cookies[dest])
+    if type(rt) == "string" then
+        api._refreshFinish(rt)
+        return
+    end
+    api._waitingMsgId = rt
+    api._refreshTimer = os.startTimer(5)
+end
+
+---@param msg NetMessage
+function api.__onNetMessage(msg)
+    if api._waitingMsgId < 0 or type(msg.dest) == "string" then
+        return
+    end
+    if msg.header.type == 'rttp' and msg.msgid == api._waitingMsgId then
+        ---@cast msg RttpMessage
+        api._waitingMsgId = -1
+        os.cancelTimer(api._refreshTimer)
+        api._refreshTimer = nil
+        api._refreshFinish(msg)
+    end
+end
+
+---@param rt RttpMessage|string
+function api._refreshFinish(rt)
+    local dest = api.url.domain ---@type string|number
+    local dIp = net.ipToNumber(dest)
+    if dIp > 0 then
+        dest = dIp
+    end
+
+    api.log:info("Finishing page load")
+
     if api.refreshButton then
         api.refreshButton.text = '*'
     end
@@ -171,8 +207,9 @@ function api.refresh()
         end
     end
     
-    if rt.header.code == rttp.responseCodes.movedTemporarily or rt.header.code == rttp.responseCodes.movedPermanently then
+    if rt.header.code == rttp.responseCodes.movedTemporarily or rt.header.code == rttp.responseCodes.movedPermanently or rt.header.code == rttp.responseCodes.seeOther then
         api.setPath(rt.header.redirect)
+        api.log:info("Redirecting to %s", rt.header.redirect)
         return
     end
     if rt.header.code ~= rttp.responseCodes.okay then
@@ -388,5 +425,13 @@ api.gui = loadfile('gui.lua')(api)
 
 api.loadBookmarks()
 api.goHome()
+net.registerMsgHandler(api.__onNetMessage)
+pos.addEventHandler(function(event) 
+    ---@cast event TimerEvent
+    local _, timer = table.unpack(event)
+    if timer == api._refreshTimer then
+        api._refreshFinish('timeout')
+    end
+end, 'timer', 'rBrowser-Timer')
 
 return api
